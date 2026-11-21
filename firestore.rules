@@ -1,0 +1,23 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 순위표(scores: 종합 모의고사, yscores: 연도 집중 시험): 누구나 읽기, 각자 자기 기록 한 개만 쓰기
+    match /{col}/{uid} {
+      allow read: if col in ['scores', 'yscores'];
+      allow create, update: if col in ['scores', 'yscores'] && request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['nick', 'score', 'correct', 'total', 'ms', 'at'])
+        && request.resource.data.nick is string
+        && request.resource.data.nick.size() >= 1 && request.resource.data.nick.size() <= 12
+        && request.resource.data.score is int
+        && request.resource.data.score >= 0 && request.resource.data.score <= 100
+        && request.resource.data.correct is int && request.resource.data.total is int
+        && request.resource.data.correct <= request.resource.data.total
+        && request.resource.data.total <= 50
+        && request.resource.data.ms is number && request.resource.data.ms > 30000;
+      allow delete: if false;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
