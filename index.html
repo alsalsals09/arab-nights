@@ -59,6 +59,7 @@ h1,h2,h3{font-family:var(--f-display);font-weight:700;text-wrap:balance;margin:0
 .road .kw{font-size:13px;color:var(--dim)}
 .road .st{font-size:12px;font-weight:700;color:var(--sand)}
 .road li.soon .st,.road li.lock .st{color:var(--mute)}
+.road .st.restart{color:var(--mute);font-weight:500;text-decoration:underline;justify-self:start;padding:4px 0}
 .settings{margin-top:30px;border-top:1px solid var(--line);padding-top:16px;display:grid;gap:12px;color:var(--dim);font-size:14px}
 .settings label{display:flex;gap:10px;align-items:center}
 .settings input{width:18px;height:18px;accent-color:var(--sand)}
@@ -2181,6 +2182,11 @@ const store = (() => {
   return d;
 })();
 function save(){ try{ localStorage.setItem(KEY, JSON.stringify(store)); }catch(e){} }
+function mark(at, pos){ // 이어하기: 시나리오 안에서 어디까지 왔는지 이 기기에 저장
+  if (!cur) return; const r = store.resume;
+  if (r && r.id === cur.sc.id && r.at === at && r.pos === pos) return;
+  store.resume = {id: cur.sc.id, at, pos: pos || 0}; save();
+}
 function meet(id){ if (CH[id] && !store.met.includes(id)) { store.met.push(id); save(); } }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const shuffle = a => { a = a.slice(); for (let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; };
@@ -2649,12 +2655,15 @@ function isPlayable(i){ // 로드맵 순서상 앞 시나리오를 깨야 열림
 function renderHome(){
   SND.setTheme('home');
   const total = Object.keys(CH).length, clear = SCENARIOS.filter(s => store.cleared[s.id]).length;
-  $('#stats').innerHTML = `<button class="chip" id="nick-chip" style="background:none;color:var(--sand);border-color:var(--sand-deep)">${esc(store.nick || '닉네임 없음')} · 바꾸기</button><span class="chip">클리어 ${clear} / ${SCENARIOS.length}</span><span class="chip">만난 인물 ${store.met.length} / ${total}</span><span class="chip">로드맵 ${ROADMAP.length}개 시대</span>`;
+  $('#stats').innerHTML = `<button class="chip" id="nick-chip" style="background:none;color:var(--sand);border-color:var(--sand-deep)">${esc(store.nick || '닉네임 없음')} · 바꾸기</button>${store.resume && scById(store.resume.id) ? `<button class="chip" id="resume-chip" style="background:var(--sand);color:#1b1608;border-color:var(--sand)">▶ 이어하기: ${esc(scById(store.resume.id).title)}</button>` : ''}<span class="chip">클리어 ${clear} / ${SCENARIOS.length}</span><span class="chip">만난 인물 ${store.met.length} / ${total}</span><span class="chip">로드맵 ${ROADMAP.length}개 시대</span>`;
   $('#road').innerHTML = ROADMAP.map((r, i) => {
     const sc = r.ref ? scById(r.ref) : null, d = sc || r;
     let cls = 'soon', st = '준비 중';
     if (sc) {
-      if (store.cleared[sc.id]) { cls = 'clear'; st = '클리어 ' + '★'.repeat(store.cleared[sc.id]) + '☆'.repeat(3-store.cleared[sc.id]) + ' · 다시 하기'; }
+      const rs = store.resume && store.resume.id === sc.id ? store.resume : null;
+      const rl = rs ? (rs.at === 'stage' ? `장면 ${rs.pos + 1} / ${sc.scenes.length}` : rs.at === 'summary' ? '핵심 정리' : '퀴즈') : '';
+      if (rs && (store.cleared[sc.id] || isPlayable(i))) { cls = store.cleared[sc.id] ? 'clear' : 'play'; st = `▶ 이어하기 · ${rl}</span><span class="st restart" data-fresh="${sc.id}" role="button">처음부터 다시`; }
+      else if (store.cleared[sc.id]) { cls = 'clear'; st = '클리어 ' + '★'.repeat(store.cleared[sc.id]) + '☆'.repeat(3-store.cleared[sc.id]) + ' · 다시 하기'; }
       else if (isPlayable(i)) { cls = 'play'; st = '▶ 시작하기'; }
       else { cls = 'lock'; st = '앞 시나리오의 퀴즈를 통과하면 열림'; }
     }
@@ -2671,8 +2680,8 @@ function renderHome(){
   $('#opt-tts').checked = store.tts; $('#opt-unlock').checked = store.unlock;
   $('#opt-music').checked = store.music; $('#opt-sfx').checked = store.sfx;
 }
-$('#stats').addEventListener('click', e => { if (e.target.closest('#nick-chip')) show('title'); });
-$('#road').addEventListener('click', e => { const b = e.target.closest('[data-s]'); if (b) startScenario(b.dataset.s); });
+$('#stats').addEventListener('click', e => { if (e.target.closest('#nick-chip')) show('title'); if (e.target.closest('#resume-chip')) startScenario(store.resume.id); });
+$('#road').addEventListener('click', e => { const f = e.target.closest('[data-fresh]'); if (f) return startScenario(f.dataset.fresh, true); const b = e.target.closest('[data-s]'); if (b) startScenario(b.dataset.s); });
 $('#opt-tts').onchange = e => { store.tts = e.target.checked; save(); };
 $('#opt-music').onchange = e => { store.music = e.target.checked; save(); SND.apply(); };
 $('#opt-sfx').onchange = e => { store.sfx = e.target.checked; save(); SND.apply(); };
@@ -2689,9 +2698,15 @@ $('#go-tl').onclick = renderTimeline;
 
 /* ---------- 영화식 오프닝 ---------- */
 let cur = null, cineI = 0, cineT = null, cineSafe = null;
-function startScenario(id){
+function startScenario(id, fresh){
   SND.setTheme(id);
   cur = { sc: scById(id), pos: 0 };
+  const r = store.resume;
+  if (!fresh && r && r.id === id && (r.at !== 'stage' || r.pos < cur.sc.scenes.length)) { // 저장된 곳부터 이어서
+    if (r.at === 'summary') return renderSummary();
+    if (r.at === 'quiz') { renderSummary(); return startQuiz(); }
+    show('stage'); cur.pos = r.pos; syncTtsBtn(); renderStep(); finishReveal(); return;
+  }
   cineI = 0; show('cine'); cineNext();
 }
 function cineNext(){ // 자동으로 넘어가지 않고, 화면을 눌러야 다음 줄로
@@ -2763,6 +2778,7 @@ function finishReveal(){ document.querySelectorAll('#lower .txt').forEach(t => t
 
 function renderStep(){
   const sc = cur.sc, s = sc.scenes[cur.pos], ctx = contextAt(cur.pos);
+  mark('stage', cur.pos);
   $('#prog').style.width = ((cur.pos + 1) / sc.scenes.length * 100) + '%';
   setScene(ctx.bg, ctx.art);
   $('#yr').textContent = ctx.y; $('#pl').textContent = ctx.p;
@@ -2826,6 +2842,7 @@ function toast(msg){ let t = $('#toast'); if (!t) { t = document.createElement('
 /* ---------- 요약 ---------- */
 function renderSummary(){
   const sc = cur.sc, el = $('#summary');
+  mark('summary');
   el.innerHTML = `
     <div class="page-head"><button class="icon-btn" data-home>✕</button><h2>${esc(sc.title)} · 핵심 정리</h2></div>
     <ol class="sum-list">${sc.summary.map(s => `<li><span class="y">${esc(s.y)}</span><p>${fmt(s.x)}</p></li>`).join('')}</ol>
@@ -2840,7 +2857,7 @@ function renderSummary(){
 /* ---------- 퀴즈 ---------- */
 let Q = null;
 function startQuiz(){
-  const sc = cur.sc;
+  const sc = cur.sc; mark('quiz');
   Q = { items: sc.quiz, title: sc.title, exam: false, queue: sc.quiz.map((_, i) => i), solved: 0, miss: 0, first: new Set() };
   renderQ();
 }
@@ -2929,7 +2946,7 @@ function feedback(ok, q, rightLine){
 /* ---------- 클리어 ---------- */
 function finishScenario(){
   const sc = cur.sc, stars = Q.miss === 0 ? 3 : Q.miss <= 2 ? 2 : 1;
-  store.cleared[sc.id] = Math.max(store.cleared[sc.id] || 0, stars); save(); SND.fx('clear'); examBg(false);
+  store.cleared[sc.id] = Math.max(store.cleared[sc.id] || 0, stars); if (store.resume && store.resume.id === sc.id) delete store.resume; save(); SND.fx('clear'); examBg(false);
   const idx = ROADMAP.findIndex(r => r.ref === sc.id), nextR = ROADMAP[idx + 1];
   const nextSc = nextR && nextR.ref ? scById(nextR.ref) : null;
   const inSc = new Set(sc.scenes.flatMap(s => (s.who ? [s.who] : []).concat(s.x ? idsIn(s.x) : [])));
