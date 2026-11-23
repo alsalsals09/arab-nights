@@ -121,6 +121,7 @@ h1,h2,h3{font-family:var(--f-display);font-weight:700;text-wrap:balance;margin:0
 .final-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .final-btns .btn{flex:1 1 140px;min-height:44px}
 .cine-skip{position:absolute;right:max(16px,env(safe-area-inset-right,0px));bottom:calc(9vh + 14px);z-index:3}
+.cine-back{position:absolute;left:max(16px,env(safe-area-inset-left,0px));bottom:calc(9vh + 14px);z-index:3}
 .cine-hint{position:absolute;left:0;right:0;bottom:calc(9vh + 20px);text-align:center;font-size:12px;color:var(--mute);z-index:3;pointer-events:none}
 
 /* ---------- Stage ---------- */
@@ -341,6 +342,7 @@ h1,h2,h3{font-family:var(--f-display);font-weight:700;text-wrap:balance;margin:0
   <section class="screen" id="cine" hidden>
     <div id="cine-box"></div>
     <div class="cine-hint">화면을 누르면 다음 자막</div>
+    <button class="btn ghost small cine-back" id="cine-back" hidden>◀ 이전</button>
     <button class="btn ghost small cine-skip" id="cine-skip">건너뛰기</button>
   </section>
 
@@ -2256,7 +2258,7 @@ const tts = {
         const au = new Audio(file); this.audio = au;
         au.onended = () => { if (this.audio === au) { this.audio = null; done && done(); } };
         au.onerror = () => { if (this.audio === au) { this.audio = null; if (!this.synth(text, done, opt.who)) done && done(); } };
-        au.play().catch(() => au.onerror());
+        au.play().catch(() => au.onerror && au.onerror());
         return true;
       } catch(e) {}
     }
@@ -2696,6 +2698,7 @@ function cineNext(){ // 자동으로 넘어가지 않고, 화면을 눌러야 �
   clearTimeout(cineT); clearTimeout(cineSafe);
   const lines = cur.sc.opening;
   if (cineI >= lines.length) { tts.stop(); return startStage(); }
+  $('#cine-back').hidden = cineI === 0;
   const vkey = cur.sc.id + '-o' + cineI, ln = lines[cineI++], box = $('#cine-box');
   if (typeof ln === 'string') {
     box.innerHTML = `<div class="cine-line">${hl(esc(ln))}</div>`;
@@ -2707,7 +2710,9 @@ function cineNext(){ // 자동으로 넘어가지 않고, 화면을 눌러야 �
   }
   if (store.unlock) box.insertAdjacentHTML('beforeend', `<div class="art-slot" style="position:static;margin:16px auto 0;width:max-content">음성 ${vkey}${VOICE[vkey] ? ' ✓' : ''}</div>`);
 }
-$('#cine').addEventListener('click', e => { if (e.target.id === 'cine-skip') return; cineNext(); });
+function cinePrev(){ if (cineI > 1) { cineI -= 2; cineNext(); } }
+$('#cine').addEventListener('click', e => { if (e.target.id === 'cine-skip' || e.target.id === 'cine-back') return; cineNext(); });
+$('#cine-back').onclick = cinePrev;
 $('#cine-skip').onclick = () => { clearTimeout(cineT); cineI = cur.sc.opening.length; cineNext(); };
 
 /* ---------- 무대 (장면 진행) ---------- */
@@ -2761,7 +2766,7 @@ function renderStep(){
   $('#prog').style.width = ((cur.pos + 1) / sc.scenes.length * 100) + '%';
   setScene(ctx.bg, ctx.art);
   $('#yr').textContent = ctx.y; $('#pl').textContent = ctx.p;
-  $('#stg-back').disabled = cur.pos === 0;
+  $('#stg-back').disabled = false; // 첫 장면에서는 오프닝으로 돌아감
   const chap = $('#chap'), low = $('#lower');
   chap.hidden = true; low.innerHTML = '';
   const vkey = sc.id + '-' + cur.pos;
@@ -2808,9 +2813,10 @@ document.addEventListener('keydown', e => {
   if (!$('#stage').hidden && (e.key === ' ' || e.key === 'Enter' || e.key === 'ArrowRight')) { e.preventDefault(); advance(); }
   if (!$('#stage').hidden && e.key === 'ArrowLeft') $('#stg-back').click();
   if (!$('#cine').hidden && (e.key === ' ' || e.key === 'Enter')) { e.preventDefault(); cineNext(); }
+  if (!$('#cine').hidden && e.key === 'ArrowLeft') cinePrev();
 });
 $('#stg-home').onclick = () => { tts.stop(); renderHome(); show('home'); };
-$('#stg-back').onclick = () => { if (cur.pos > 0) { cur.pos--; renderStep(); finishReveal(); } };
+$('#stg-back').onclick = () => { if (cur.pos > 0) { cur.pos--; renderStep(); finishReveal(); } else { cineI = cur.sc.opening.length - 1; show('cine'); cineNext(); } }; // 첫 장면에서 이전 → 오프닝 마지막 줄
 $('#stg-music').onclick = () => { store.music = !store.music; save(); SND.apply(); syncTtsBtn(); };
 $('#stg-tts').onclick = () => { store.tts = !store.tts; save(); syncTtsBtn(); if (!store.tts) return tts.stop();
   if (!tts.available()) return toast('이 화면에서는 기기가 음성을 지원하지 않아요. 게임 링크를 크롬이나 사파리에서 열어 주세요.');
